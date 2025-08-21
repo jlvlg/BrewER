@@ -172,7 +172,7 @@ class BlendER:
             item = heapq.heappop(queue)
             if item.solved:
                 if len(pd.DataFrame([item.item[0]]).query(query)):
-                    self.emit(item.item[0], item.item[1], item.item[2])
+                    self.emit(item.item[0], item.item[1], comparisons)
                 continue
             if item.item[0] in analyzed:
                 continue
@@ -187,7 +187,7 @@ class BlendER:
                     queue,
                     PriorityItem(
                         entity[self.order_by[0].name],
-                        [entity, ids, comparisons],
+                        [entity, ids],
                         self.order_by[1] == SqlOrderBy.DESC,
                         solved=True,
                     ),
