@@ -12,14 +12,15 @@ from .util import (
     SqlOrderBy,
     PriorityItem,
 )
-from typing import Callable, Any, Optional
+from typing import Callable, Any, Optional, Sequence
 import pandas as pd
 from .resolution_function import ResolutionFunction
 import random
 import heapq
 from collections import deque
+import inspect
 
-type ListenerType = Callable[[pd.Series], None]
+type ListenerType = Callable
 
 
 class BlendER:
@@ -135,9 +136,15 @@ class BlendER:
         if self.op == SqlOperation.SELECT:
             return self.run_select()
 
-    def emit(self, entity: pd.Series):
+    def emit(self, entity: pd.Series, cluster: set[str], comparisons: int):
         for listener in self.listeners:
-            listener(entity)
+            params = len(inspect.signature(listener).parameters)
+            if params == 1:
+                listener(entity)
+            elif params == 2:
+                listener(entity, cluster)
+            else:
+                listener(entity, cluster, comparisons)
 
     def run_select(self):
         if not len(self.tables):
@@ -159,35 +166,34 @@ class BlendER:
             self.conditions[table]
         )
 
+        comparisons = 0
+
         while len(queue):
             item = heapq.heappop(queue)
             if item.solved:
-                if len(pd.DataFrame([item.item]).query(query)):
-                    self.emit(item.item)
+                if len(pd.DataFrame([item.item[0]]).query(query)):
+                    self.emit(item.item[0], item.item[1], item.item[2])
                 continue
             if item.item[0] in analyzed:
                 continue
 
-            entity_cluster = self.match(table, analyzed, item.item[0])
+            entity_cluster, comparisons = self.match(
+                table, analyzed, item.item[0], comparisons
+            )
 
-            entity = self.resolve_entity(table, entity_cluster)
+            entity, ids = self.resolve_entity(table, entity_cluster)
             if len(entity):
                 heapq.heappush(
                     queue,
                     PriorityItem(
                         entity[self.order_by[0].name],
-                        entity,
+                        [entity, ids, comparisons],
                         self.order_by[1] == SqlOrderBy.DESC,
                         solved=True,
                     ),
                 )
 
-    def match(
-        self,
-        table: Table,
-        analyzed: set,
-        record_idx: Any,
-    ) -> set:
+    def match(self, table: Table, analyzed: set, record_idx: Any, comparisons: int):
         candidates = [
             block.index for block in table.blocks if record_idx in block.index
         ]
@@ -201,12 +207,13 @@ class BlendER:
             for candidate in block:
                 if candidate in entity_cluster:
                     continue
+                comparisons += 1
                 if self.is_match(table, idx, candidate):
                     entity_cluster.add(candidate)
                     to_analyze.append(candidate)
 
         analyzed.update(entity_cluster)
-        return entity_cluster
+        return entity_cluster, comparisons
 
     def is_match(self, table: Table, l, r):
         if l == r:
@@ -229,4 +236,4 @@ class BlendER:
             entity[column.name] = column.resolution_function.resolve(
                 records[column.name]
             )
-        return pd.Series(entity)
+        return pd.Series(entity), set(records[table.id_column])
