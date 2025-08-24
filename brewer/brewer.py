@@ -23,19 +23,20 @@ import inspect
 type ListenerType = Callable
 
 
-class BlendER:
+class BrewER:
     def __init__(self):
         self.listeners: list[ListenerType] = []
         self.op = SqlOperation.UNKNOWN
         self.tables: dict[Table, list[Column]] = {}
         self.conditions: dict[Table, Any] = {}
         self.seed_records: dict[Table, pd.DataFrame] = {}
-        self.candidate_records: dict[Table, pd.DataFrame] = {}
+        self.seed_candidates: dict[Table, pd.DataFrame] = {}
         self.order_by: tuple[Column, SqlOrderBy]
         self.did_where_change = False
         self.matches: dict[Table, UnorderedTupleSet] = {}
         self.not_matches: dict[Table, UnorderedTupleSet] = {}
         self.on: dict[str, list[str]] = {}
+        self.top_k = None
 
     def subscribe(self, *listeners: ListenerType):
         self.listeners.extend(listeners)
@@ -44,7 +45,6 @@ class BlendER:
     def from_table(self, table: Table):
         self.tables[table] = []
         self.seed_records[table] = table.data
-        self.candidate_records[table] = table.data
         self.matches[table] = UnorderedTupleSet()
         self.not_matches[table] = UnorderedTupleSet()
         return self
@@ -55,7 +55,6 @@ class BlendER:
         self.matches[table] = UnorderedTupleSet()
         self.not_matches[table] = UnorderedTupleSet()
         self.seed_records[table] = table.data
-        self.candidate_records[table] = table.data
         tree = query_on_parser.parse(on)
         columns = QueryOnTransformer().transform(tree)
         for k, v in columns.items():
@@ -67,10 +66,12 @@ class BlendER:
         self,
         *columns: tuple[str, type[ResolutionFunction]],
         order_by: Optional[tuple[str, SqlOrderBy]] = None,
+        top_k: Optional[int] = None,
     ):
         if not len(columns):
             raise IndexError("You must select at least one column")
         self.op = SqlOperation.SELECT
+        self.top_k = top_k
 
         table_aliases = {table.alias: table for table in self.tables}
 
@@ -121,20 +122,24 @@ class BlendER:
                 extract_seed_records=True,
             ).transform(self.conditions[table])
             if query is not None:
-                seed_frames = []
-                for block in table.blocks:
-                    seeds = block.query(query)
-                    if len(seeds):
-                        seed_frames.append(seeds)
-                seeds = pd.concat(seed_frames)
-                seeds = seeds[~seeds.index.duplicated(keep="first")]
+                seeds = table.data.query(query)
+                candidates = pd.concat(
+                    [
+                        block
+                        for block in table.blocks
+                        if set(seeds.index) & set(block.index)
+                    ]
+                    + [seeds]
+                ).drop_duplicates(keep="first")
             else:
                 seeds = table.data
+                candidates = table.data
             self.seed_records[table] = seeds
+            self.seed_candidates[table] = candidates
 
-    def run(self):
+    def run(self, seeds_only=False, reset_matches=False):
         if self.op == SqlOperation.SELECT:
-            return self.run_select()
+            return self.run_select(seeds_only, reset_matches)
 
     def emit(self, entity: pd.Series, cluster: set[str], comparisons: int):
         for listener in self.listeners:
@@ -146,7 +151,7 @@ class BlendER:
             else:
                 listener(entity, cluster, comparisons)
 
-    def run_select(self):
+    def run_select(self, seeds_only, reset_matches):
         if not len(self.tables):
             raise IndexError("You must load at least one table")
         if self.did_where_change:
@@ -159,20 +164,38 @@ class BlendER:
                 item=[idx, row],
                 reverse=self.order_by[1] == SqlOrderBy.DESC,
             )
-            for idx, row in (self.seed_records[table].iterrows())
+            for idx, row in (
+                (
+                    self.seed_records[table]
+                    if seeds_only
+                    or self.order_by[0].resolution_function.is_discordant(
+                        self.order_by[1]
+                    )
+                    else self.seed_candidates[table]
+                ).iterrows()
+            )
         ]
         heapq.heapify(queue)
         query = QueryWhereTransformer(self.tables[table]).transform(
             self.conditions[table]
         )
 
+        if reset_matches:
+            for table in self.tables:
+                self.matches[table] = UnorderedTupleSet()
+                self.not_matches[table] = UnorderedTupleSet()
+
         comparisons = 0
+        emitted = 0
 
         while len(queue):
             item = heapq.heappop(queue)
             if item.solved:
                 if len(pd.DataFrame([item.item[0]]).query(query)):
                     self.emit(item.item[0], item.item[1], comparisons)
+                    emitted += 1
+                    if self.top_k and emitted >= self.top_k:
+                        break
                 continue
             if item.item[0] in analyzed:
                 continue
@@ -197,7 +220,10 @@ class BlendER:
         candidates = [
             block.index for block in table.blocks if record_idx in block.index
         ]
-        block = set().union(*candidates)
+        if candidates:
+            block = set().union(*candidates)
+        else:
+            block = set((record_idx,))
 
         entity_cluster = set([record_idx])
         to_analyze = deque([record_idx])
@@ -207,27 +233,29 @@ class BlendER:
             for candidate in block:
                 if candidate in entity_cluster:
                     continue
-                comparisons += 1
-                if self.is_match(table, idx, candidate):
+                result = self.is_match(table, idx, candidate, comparisons)
+                comparisons = result[1]
+                if result[0]:
                     entity_cluster.add(candidate)
                     to_analyze.append(candidate)
 
         analyzed.update(entity_cluster)
         return entity_cluster, comparisons
 
-    def is_match(self, table: Table, l, r):
+    def is_match(self, table: Table, l, r, comparisons):
         if l == r:
-            return True
+            return True, comparisons
         if (l, r) in self.matches[table]:
-            return True
+            return True, comparisons
         if (l, r) in self.not_matches[table]:
-            return False
+            return False, comparisons
+        comparisons += 1
         match = table.matcher(table.data.iloc[l], table.data.iloc[r])
         if match:
             self.matches[table].add((l, r))
         else:
             self.not_matches[table].add((l, r))
-        return match
+        return match, comparisons
 
     def resolve_entity(self, table: Table, entity_cluster: set):
         entity = {}
