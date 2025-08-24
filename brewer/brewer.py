@@ -45,6 +45,7 @@ class BrewER:
     def from_table(self, table: Table):
         self.tables[table] = []
         self.seed_records[table] = table.data
+        self.seed_candidates[table] = table.data
         self.matches[table] = UnorderedTupleSet()
         self.not_matches[table] = UnorderedTupleSet()
         return self
@@ -176,9 +177,12 @@ class BrewER:
             )
         ]
         heapq.heapify(queue)
+
+        conditions = self.conditions.get(table)
+
         query = QueryWhereTransformer(self.tables[table]).transform(
-            self.conditions[table]
-        )
+            conditions
+        ) if conditions else None
 
         if reset_matches:
             for table in self.tables:
@@ -191,7 +195,7 @@ class BrewER:
         while len(queue):
             item = heapq.heappop(queue)
             if item.solved:
-                if len(pd.DataFrame([item.item[0]]).query(query)):
+                if not conditions or len(pd.DataFrame([item.item[0]]).query(query)):
                     self.emit(item.item[0], item.item[1], comparisons)
                     emitted += 1
                     if self.top_k and emitted >= self.top_k:
@@ -217,20 +221,26 @@ class BrewER:
                 )
 
     def match(self, table: Table, analyzed: set, record_idx: Any, comparisons: int):
-        candidates = [
-            block.index for block in table.blocks if record_idx in block.index
-        ]
-        if candidates:
-            block = set().union(*candidates)
-        else:
-            block = set((record_idx,))
-
-        entity_cluster = set([record_idx])
         to_analyze = deque([record_idx])
+        entity_cluster = set([record_idx])
 
         while to_analyze:
             idx = to_analyze.popleft()
+
+            if idx  in analyzed:
+                continue
+            
+            candidates = [
+                block.index for block in table.blocks if record_idx in block.index
+            ]
+            if candidates:
+                block = set().union(*candidates)
+            else:
+                block = set((record_idx,))
+            
             for candidate in block:
+                if candidate in analyzed:
+                    continue
                 if candidate in entity_cluster:
                     continue
                 result = self.is_match(table, idx, candidate, comparisons)
@@ -250,7 +260,7 @@ class BrewER:
         if (l, r) in self.not_matches[table]:
             return False, comparisons
         comparisons += 1
-        match = table.matcher(table.data.iloc[l], table.data.iloc[r])
+        match = table.matcher(table.data.loc[l], table.data.loc[r])
         if match:
             self.matches[table].add((l, r))
         else:
