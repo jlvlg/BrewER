@@ -30,7 +30,6 @@ class BrewER:
         self.tables: dict[Table, list[Column]] = {}
         self.conditions: dict[Table, Any] = {}
         self.seed_records: dict[Table, pd.DataFrame] = {}
-        self.seed_candidates: dict[Table, pd.DataFrame] = {}
         self.order_by: tuple[Column, SqlOrderBy]
         self.did_where_change = False
         self.matches: dict[Table, UnorderedTupleSet] = {}
@@ -45,7 +44,6 @@ class BrewER:
     def from_table(self, table: Table):
         self.tables[table] = []
         self.seed_records[table] = table.data
-        self.seed_candidates[table] = table.data
         self.matches[table] = UnorderedTupleSet()
         self.not_matches[table] = UnorderedTupleSet()
         return self
@@ -124,23 +122,13 @@ class BrewER:
             ).transform(self.conditions[table])
             if query is not None:
                 seeds = table.data.query(query)
-                candidates = pd.concat(
-                    [
-                        block
-                        for block in table.blocks
-                        if set(seeds.index) & set(block.index)
-                    ]
-                    + [seeds]
-                ).drop_duplicates(keep="first")
             else:
                 seeds = table.data
-                candidates = table.data
             self.seed_records[table] = seeds
-            self.seed_candidates[table] = candidates
 
-    def run(self, seeds_only=False, reset_matches=False):
+    def run(self, reset_matches=False):
         if self.op == SqlOperation.SELECT:
-            return self.run_select(seeds_only, reset_matches)
+            return self.run_select(reset_matches)
 
     def emit(self, entity: pd.Series, cluster: set[str], comparisons: int):
         for listener in self.listeners:
@@ -152,7 +140,7 @@ class BrewER:
             else:
                 listener(entity, cluster, comparisons)
 
-    def run_select(self, seeds_only, reset_matches):
+    def run_select(self, reset_matches):
         if not len(self.tables):
             raise IndexError("You must load at least one table")
         if self.did_where_change:
@@ -165,16 +153,7 @@ class BrewER:
                 item=[idx, row],
                 reverse=self.order_by[1] == SqlOrderBy.DESC,
             )
-            for idx, row in (
-                (
-                    self.seed_records[table]
-                    if seeds_only
-                    or self.order_by[0].resolution_function.is_discordant(
-                        self.order_by[1]
-                    )
-                    else self.seed_candidates[table]
-                ).iterrows()
-            )
+            for idx, row in self.seed_records[table].iterrows()
         ]
         heapq.heapify(queue)
 
