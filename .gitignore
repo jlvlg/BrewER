@@ -204,4 +204,21 @@ __marimo__/
 
 .conda
 
-output/
+output
+
+cache
+
+results
+
+experiments/*/raw_data/*
+!experiments/*/raw_data/datasets
+!experiments/*/raw_data/place_candset.csv_here
+!experiments/*/raw_data/place_labeled_data.csv_here
+
+experiments/*/raw_data/datasets/*
+!experiments/*/raw_data/datasets/place_datasets_here
+
+
+data
+
+*.pem

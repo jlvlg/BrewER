@@ -1,0 +1,8 @@
+[build-system]
+requires = ["setuptools"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "brewer"
+version = "1.0.0"
+dependencies = ["lark", "pandas"]
