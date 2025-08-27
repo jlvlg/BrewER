@@ -47,8 +47,9 @@ r_ds.columns = r_ds.columns.str.lower()
 ds = pd.concat([l_ds, r_ds], ignore_index=True, join="inner").set_index("_id")
 
 # # Preprocess numeric columns
-ds["price"] = pd.to_numeric(ds["price"], errors="coerce")
-ds["length"] = pd.to_numeric(ds["length"], errors="coerce")
+ds["year"] = pd.to_numeric(ds["year"], errors="coerce")
+ds["number"] = pd.to_numeric(ds["number"], errors="coerce")
+ds["volume"] = pd.to_numeric(ds["volume"], errors="coerce")
 
 # Save the obtained dataset
 ds.to_csv(ds_path)
@@ -62,7 +63,7 @@ lab = lab.rename(columns={f"ltable.{id_col}": "l_id", f"rtable.{id_col}": "r_id"
 # Filter out useless columns and map the identifiers
 l_old_ids = list(lab["l_id"])
 r_old_ids = list(lab["r_id"])
-labels = list(lab["gold"])
+labels = list(lab["is_match"])
 new_ids = [
     (l_map[l_old_ids[i]], r_map[r_old_ids[i]], labels[i]) for i in range(0, len(lab))
 ]
