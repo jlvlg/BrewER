@@ -6,8 +6,8 @@ from pathlib import Path
 Path("raw_data/datasets").mkdir(parents=True, exist_ok=True)
 Path("data").mkdir(parents=True, exist_ok=True)
 
-l_ds_name = "amazon"
-r_ds_name = "best_buy"
+l_ds_name = "zomato"
+r_ds_name = "yelp"
 id_col = "ID"
 
 raw_ds_path = "raw_data/datasets/"
@@ -47,8 +47,9 @@ r_ds.columns = r_ds.columns.str.lower()
 ds = pd.concat([l_ds, r_ds], ignore_index=True, join="inner").set_index("_id")
 
 # # Preprocess numeric columns
-ds["price"] = pd.to_numeric(ds["price"], errors="coerce")
-ds["length"] = pd.to_numeric(ds["length"], errors="coerce")
+ds["name"] = pd.to_numeric(ds["name"], errors="coerce")
+ds["votes"] = pd.to_numeric(ds["votes"], errors="coerce")
+ds["zip"] = pd.to_numeric(ds["zip"], errors="coerce")
 
 # Save the obtained dataset
 ds.to_csv(ds_path)
@@ -60,8 +61,8 @@ lab = pd.read_csv(raw_lab_path, comment="#")
 lab = lab.rename(columns={f"ltable.{id_col}": "l_id", f"rtable.{id_col}": "r_id"})
 
 # Filter out useless columns and map the identifiers
-l_old_ids = list(lab["l_id"])
-r_old_ids = list(lab["r_id"])
+l_old_ids = list(lab["ltable.id"])
+r_old_ids = list(lab["rtable.id"])
 labels = list(lab["gold"])
 new_ids = [
     (l_map[l_old_ids[i]], r_map[r_old_ids[i]], labels[i]) for i in range(0, len(lab))

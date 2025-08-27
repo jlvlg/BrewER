@@ -47,7 +47,7 @@ class QueryWhereTransformer(Transformer):
     def _any(self, items):
         items = [item for item in items if item is not None]
         if len(items) > 1:
-            return f"({' OR '.join(items)})"
+            return f"({' or '.join(items)})"
         if len(items):
             return items[0]
 
