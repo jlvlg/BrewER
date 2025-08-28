@@ -13,7 +13,7 @@ importlib.reload(brewer)
 
 data_path = Path("data")
 data_path.mkdir(parents=True, exist_ok=True)
-out_dir = Path("results/experiments_or")
+out_dir = Path("results/experiments_and")
 out_dir.mkdir(parents=True, exist_ok=True)
 cache_path = Path("cache")
 cache_path.mkdir(parents=True, exist_ok=True)
@@ -120,14 +120,12 @@ def resolve(records):
     entity["_id"] = (
         records["_id"].mode().iloc[0] if not records["_id"].mode().empty else None
     )
-    entity["title"] = (
-        records["title"].mode().iloc[0] if not records["title"].mode().empty else None
+    entity["description"] = (
+        records["description"].mode().iloc[0]
+        if not records["description"].mode().empty
+        else None
     )
-    entity["author"] = (
-        records["author"].mode().iloc[0] if not records["author"].mode().empty else None
-    )
-    entity["year"] = records["year"].mean()
-    entity["volume"] = records["volume"].mean()
+    entity["price"] = records["price"].mean()
     return entity
 
 
@@ -135,8 +133,9 @@ def resolve(records):
 resolved = pd.DataFrame([resolve(data[data["_id"].isin(entity)]) for entity in results])
 # Change to the where query you used on blender, and the order by
 batch_filtered = resolved[
-    (resolved["year"] > 2000) | (resolved["volume"] > 20)
-].sort_values("year", ascending=False)
+    (resolved["price"] > 20)
+    | (resolved["description"].str.contains("liner", case=False))
+].sort_values("price", ascending=False)
 batch_filtered_pairs = set()
 for group in (results[index] for index in batch_filtered.index):
     if len(group) > 1:
@@ -206,7 +205,7 @@ def listener(entity, cluster, comparisons):
         {
             "elapsed_time": time.time() - brewer_start,
             "comparisons": comparisons,
-            "order": entity["table_year"],
+            "order": entity["table_price"],
             "tp": len(cluster_pairs & batch_filtered_pairs),
             "fp": len(cluster_pairs - batch_filtered_pairs),
         }
@@ -266,13 +265,11 @@ brewer = (
     .from_table(brewer.Table(data, blocks, matcher_table, "table", "_id"))
     .select(
         ("table._id", brewer.resolution_function.VOTE),
-        ("table.title", brewer.resolution_function.VOTE),
-        ("table.author", brewer.resolution_function.VOTE),
-        ("table.year", brewer.resolution_function.AVG),
-        ("table.volume", brewer.resolution_function.AVG),
-        order_by=("table.year", brewer.SqlOrderBy.ASC),
+        ("table.description", brewer.resolution_function.VOTE),
+        ("table.price", brewer.resolution_function.AVG),
+        order_by=("table.price", brewer.SqlOrderBy.ASC),
     )
-    .where("table.year > 2000 or table.volume > 20")
+    .where('table.price > 20 or table.description ILIKE "liner"')
     .subscribe(listener)
 )
 

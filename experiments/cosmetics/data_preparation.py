@@ -6,9 +6,10 @@ from pathlib import Path
 Path("raw_data/datasets").mkdir(parents=True, exist_ok=True)
 Path("data").mkdir(parents=True, exist_ok=True)
 
-l_ds_name = "dblp"
-r_ds_name = "google_scholar"
-id_col = "ID"
+l_ds_name = "sephora"
+r_ds_name = "amazon"
+l_id_col = "Product_id"
+r_id_col = "ID"
 
 raw_ds_path = "raw_data/datasets/"
 raw_lab_path = "raw_data/labeled_data.csv"
@@ -18,38 +19,40 @@ ds_path = "data/dataset.csv"
 match_path = "data/matches.csv"
 lab_path = "data/labels.csv"
 
-l_ds = pd.read_csv(raw_ds_path + l_ds_name + ".csv", encoding="latin")
+l_ds = pd.read_csv(
+    raw_ds_path + l_ds_name + ".csv", skipinitialspace=True, encoding="latin"
+)
 l_ds_len = len(l_ds)
 l_ds["_id"] = l_ds.index
 l_ds["_id"] = l_ds["_id"].apply(
     lambda x: l_ds_name + "_" + str(x).zfill(len(str(l_ds_len)))
 )
-old_ids = list(l_ds[id_col])
+old_ids = list(l_ds[l_id_col])
 new_ids = list(l_ds["_id"])
 l_map = {old_ids[i]: new_ids[i] for i in range(0, len(l_ds))}
-l_ds = l_ds.drop(columns=[id_col])
+l_ds = l_ds.drop(columns=[l_id_col])
 l_ds.columns = l_ds.columns.str.lower()
 
 # Load the second dataset and prepare its identifiers
-r_ds = pd.read_csv(raw_ds_path + r_ds_name + ".csv", encoding="latin")
+r_ds = pd.read_csv(
+    raw_ds_path + r_ds_name + ".csv", skipinitialspace=True, encoding="latin"
+)
 r_ds_len = len(r_ds)
 r_ds["_id"] = r_ds.index
 r_ds["_id"] = r_ds["_id"].apply(
     lambda x: r_ds_name + "_" + str(x).zfill(len(str(r_ds_len)))
 )
-old_ids = list(r_ds[id_col])
+old_ids = list(r_ds[r_id_col])
 new_ids = list(r_ds["_id"])
 r_map = {old_ids[i]: new_ids[i] for i in range(0, len(r_ds))}
-r_ds = r_ds.drop(columns=[id_col])
+r_ds = r_ds.drop(columns=[r_id_col])
 r_ds.columns = r_ds.columns.str.lower()
 
 # Append the two datasets
 ds = pd.concat([l_ds, r_ds], ignore_index=True, join="inner").set_index("_id")
 
 # # Preprocess numeric columns
-ds["year"] = pd.to_numeric(ds["year"], errors="coerce")
-ds["number"] = pd.to_numeric(ds["number"], errors="coerce")
-ds["volume"] = pd.to_numeric(ds["volume"], errors="coerce")
+ds["price"] = pd.to_numeric(ds["price"].str.replace("$", ""), errors="coerce")
 
 # Save the obtained dataset
 ds.to_csv(ds_path)
@@ -58,12 +61,12 @@ ds.to_csv(ds_path)
 lab = pd.read_csv(raw_lab_path, comment="#")
 
 # Rename identifier columns
-lab = lab.rename(columns={f"ltable.{id_col}": "l_id", f"rtable.{id_col}": "r_id"})
+lab = lab.rename(columns={f"ltable.{l_id_col}": "l_id", f"rtable.{r_id_col}": "r_id"})
 
 # Filter out useless columns and map the identifiers
 l_old_ids = list(lab["l_id"])
 r_old_ids = list(lab["r_id"])
-labels = list(lab["is_match"])
+labels = list(lab["gold"])
 new_ids = [
     (l_map[l_old_ids[i]], r_map[r_old_ids[i]], labels[i]) for i in range(0, len(lab))
 ]
@@ -77,10 +80,13 @@ gt = gt.reset_index(drop=True)
 # Save the obtained matches
 gt.to_csv(match_path, index=False)
 
-candset = pd.read_csv(raw_cand_path, comment="#")
+candset = pd.read_csv(raw_cand_path, comment="#", encoding="latin")
 
 pairs = list(
-    zip(candset[f"ltable.{id_col}"].map(l_map), candset[f"rtable.{id_col}"].map(r_map))
+    zip(
+        candset[f"ltable.{l_id_col}"].map(l_map),
+        candset[f"rtable.{r_id_col}"].map(r_map),
+    )
 )
 
 with open(cand_path, "wb") as file:
